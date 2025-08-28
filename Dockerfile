@@ -4,7 +4,7 @@
 # ========================================
 # Build Stage
 # ========================================
-FROM node:18-alpine AS builder
+FROM node:24-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -24,7 +24,7 @@ RUN npm run build
 # ========================================
 # Production Stage
 # ========================================
-FROM node:18-alpine AS production
+FROM node:24-alpine AS production
 
 # Create app user for security
 RUN addgroup -g 1001 -S nodejs && \
@@ -65,7 +65,7 @@ CMD ["npm", "start"]
 # ========================================
 # Development Stage (Optional)
 # ========================================
-FROM node:18-alpine AS development
+FROM node:24-alpine AS development
 
 # Set working directory
 WORKDIR /app
@@ -91,7 +91,7 @@ CMD ["npm", "run", "dev"]
 # ========================================
 # Test Stage (Optional)
 # ========================================
-FROM node:18-alpine AS test
+FROM node:24-alpine AS test
 
 # Set working directory
 WORKDIR /app
