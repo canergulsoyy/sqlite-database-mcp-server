@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Community Support
+    url: https://github.com/canergulsoyy/database-mcp-server/discussions
+    about: Please ask and answer questions here.
+  - name: Security Issues
+    url: https://github.com/canergulsoyy/database-mcp-server/security/policy
+    about: Please report security vulnerabilities here.
+  - name: Documentation
+    url: https://github.com/canergulsoyy/database-mcp-server#readme
+    about: Please check our documentation first.
+  - name: Support & Help
+    url: https://github.com/canergulsoyy/database-mcp-server/blob/main/.github/SUPPORT.md
+    about: Get help and support for common issues. 

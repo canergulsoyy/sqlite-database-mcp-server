@@ -1,0 +1,331 @@
+# 🚀 Database MCP Server CI/CD Pipeline
+# GitHub Actions workflow for automated testing and deployment
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  release:
+    types: [ published ]
+
+env:
+  NODE_VERSION: '18.18.0'
+  NPM_VERSION: '9.0.0'
+
+jobs:
+  # ========================================
+  # Code Quality & Linting
+  # ========================================
+  lint:
+    name: Lint & Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run ESLint
+        run: npm run lint
+        
+      - name: Run Prettier check
+        run: npm run format:check
+        
+      - name: TypeScript type check
+        run: npm run typecheck
+
+  # ========================================
+  # Unit Tests
+  # ========================================
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run tests
+        run: npm test
+        
+      - name: Run test coverage
+        run: npm run test:coverage
+        
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+
+  # ========================================
+  # Integration Tests
+  # ========================================
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build application
+        run: npm run build
+        
+      - name: Setup test database
+        run: npm run db:setup
+        
+      - name: Seed test data
+        run: npm run db:seed
+        
+      - name: Run integration tests
+        run: npm run test:integration
+        
+      - name: Run MCP client tests
+        run: npm run test:client
+
+  # ========================================
+  # Security Scanning
+  # ========================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate
+        
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  # ========================================
+  # Build & Package
+  # ========================================
+  build:
+    name: Build & Package
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build application
+        run: npm run build
+        
+      - name: Create release package
+        run: |
+          tar -czf database-mcp-server-${{ github.sha }}.tar.gz \
+            dist/ package.json package-lock.json \
+            README.md LICENSE CHANGELOG.md \
+            .env.example docker-compose.yml Dockerfile
+            
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: |
+            dist/
+            database-mcp-server-${{ github.sha }}.tar.gz
+
+  # ========================================
+  # Docker Build & Test
+  # ========================================
+  docker:
+    name: Docker Build & Test
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: production
+          push: false
+          tags: database-mcp-server:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          
+      - name: Test Docker image
+        run: |
+          docker run --rm database-mcp-server:test npm test
+          
+      - name: Test Docker health check
+        run: |
+          docker run -d --name test-container database-mcp-server:test
+          sleep 10
+          docker inspect test-container --format='{{.State.Health.Status}}'
+          docker stop test-container
+          docker rm test-container
+
+  # ========================================
+  # Deploy to Staging
+  # ========================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [docker, build]
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Deploy to staging environment
+        run: |
+          echo "Deploying to staging environment..."
+          # Add your staging deployment logic here
+          
+      - name: Notify deployment
+        run: |
+          echo "Staging deployment completed successfully!"
+
+  # ========================================
+  # Deploy to Production
+  # ========================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [docker, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Deploy to production environment
+        run: |
+          echo "Deploying to production environment..."
+          # Add your production deployment logic here
+          
+      - name: Notify deployment
+        run: |
+          echo "Production deployment completed successfully!"
+
+  # ========================================
+  # Release Management
+  # ========================================
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+    if: github.event_name == 'release'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-artifacts
+          
+      - name: Create GitHub release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          release_name: ${{ github.event.release.name }}
+          body: ${{ github.event.release.body }}
+          draft: false
+          prerelease: false
+          
+      - name: Upload release assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./database-mcp-server-${{ github.sha }}.tar.gz
+          asset_name: database-mcp-server-${{ github.event.release.tag_name }}.tar.gz
+          asset_content_type: application/gzip
+
+  # ========================================
+  # Notifications
+  # ========================================
+  notify:
+    name: Notify Team
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+    if: always()
+    
+    steps:
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ All checks passed successfully!"
+          # Add your success notification logic here
+          
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Some checks failed!"
+          # Add your failure notification logic here 
